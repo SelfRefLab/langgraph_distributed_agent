@@ -19,6 +19,8 @@
 ### 🏗️ 层次化智能体组织
 **智能工作流协调** - 智能体可以组织成层次结构，协调智能体将任务委派给专门的子智能体。这实现了复杂工作流编排，具有清晰的责任链和高效的任务分配。
 
+https://github.com/user-attachments/assets/6ef83c79-cb42-4cab-8359-27dfb74cdc65
+
 ## 🚀 其他特性
 
 - **MCP 服务器集成**：支持模型上下文协议服务器以扩展智能体功能
@@ -110,6 +112,8 @@ if __name__ == '__main__':
 ```
 
 ### 3. 创建客户端进行交互
+
+或者用UI界面进行交互：https://github.com/SelfRefLab/agents-ui
 
 ```python
 import asyncio
