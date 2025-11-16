@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langgraph_distributed_agent"            
+version = "0.1.3"                    
+description = "Huya AIOps Agent SDK"    
+readme = "README.md"                  
+license = { text = "MIT" }            
+authors = [
+    { name = "panjianning", email = "panjianning@huya.com" },
+    { name = "lanxuanli", email = "lanxuanli@huya.com" }
+]
+requires-python = ">=3.10"
+
+dependencies = [
+    "requests",
+    "redis",
+    "httpx",
+    "langchain",
+    "langgraph",
+    "langchain-openai",
+    "langgraph-checkpoint-sqlite",
+    "langchain-mcp-adapters",
+    "aiosqlite",
+    "langgraph-checkpoint-redis",
+    "pydantic",
+    "pydantic-settings",
+    "langgraph-checkpoint-mysql[aiomysql]",
+    "fastmcp",
+    "typing-extensions",
+    "python-dotenv",
+    "colorama"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["langgraph_distributed_agent*"]      
+
+[tool.setuptools]
+package-dir = { "" = "." }
