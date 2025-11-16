@@ -120,20 +120,18 @@ import asyncio
 from langgraph_distributed_agent.agent_client import AgentClient
 import uuid
 import os
+import dotenv
+
+dotenv.load_dotenv()
 
 async def main():
-    client = AgentClient(
-        target_agent="weather_agent",
-        redis_url=os.environ.get("REDIS_URL")
-    )
-    
+    client = AgentClient(target_agent="weather_agent",
+                         redis_url=os.environ.get("REDIS_URL", ""))
     context_id = str(uuid.uuid4())
-    
-    # 发送消息
-    await client.send_message("今天天气怎么样？", context_id)
-    
-    # 监听响应
-    await client.listen_for_responses(context_id)
+    while True:
+        question = input("Input your Question:")
+        await client.send_message(question, context_id)
+        await client.listen_for_responses(context_id)
 
 if __name__ == '__main__':
     asyncio.run(main())
