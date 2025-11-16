@@ -19,6 +19,8 @@ A distributed agent framework built on top of LangGraph that enables multiple AI
 ### 🏗️ Hierarchical Agent Organization
 **Intelligent workflow coordination** - Agents can be organized in hierarchical structures where coordinator agents delegate tasks to specialized sub-agents. This enables complex workflow orchestration with clear responsibility chains and efficient task distribution.
 
+https://github.com/user-attachments/assets/6ef83c79-cb42-4cab-8359-27dfb74cdc65
+
 ## 🚀 Additional Features
 
 - **MCP Server Integration**: Support for Model Context Protocol servers to extend agent capabilities
@@ -110,6 +112,8 @@ if __name__ == '__main__':
 ```
 
 ### 3. Create a Client to Interact
+
+**or test with ui** https://github.com/SelfRefLab/agents-ui
 
 ```python
 import asyncio
