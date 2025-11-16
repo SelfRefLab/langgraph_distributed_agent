@@ -75,7 +75,12 @@ from langchain_core.tools import tool
 from langgraph.runtime import get_runtime
 import asyncio
 from langgraph_distributed_agent.agent_runner import AgentRunner
+from langgraph_distributed_agent.utils import human_approval_required
 import os
+from typing import Annotated
+from langchain_core.tools import tool, InjectedToolCallId
+from langchain_core.runnables import RunnableConfig
+
 import dotenv
 dotenv.load_dotenv()
 
@@ -93,10 +98,20 @@ def get_city_weather(city: str) -> str:
     print("current context", get_runtime().context)
     return f"It's always sunny in {city}!"
 
+@tool
+@human_approval_required
+def get_city_gdp(city: str,
+                 config: RunnableConfig,
+                 injected_tool_call_id: Annotated[str, InjectedToolCallId]) -> str:
+    """Get city gdp"""
+    print(get_runtime())
+    return f"The gdp of {city} is 500 billion yuan!"
+
+
 async def main():
     runner = AgentRunner(
-        agent_name="weather_agent",
-        system_prompt="You are a economist.",
+        agent_name="demo_agent",
+        system_prompt="You are a helpful assistant.",
         redis_url=os.environ.get("REDIS_URL", ""),
         mysql_url=os.environ.get("CHECKPOINT_DB_URL", ""),
         openai_base_url=os.environ.get(
@@ -105,6 +120,7 @@ async def main():
         openai_api_key=os.environ.get("OPENAI_API_KEY", "")
     )
     runner.add_tool(get_city_weather)
+    runner.add_tool(get_city_gdp)
     await runner.start()
 
 if __name__ == '__main__':
@@ -125,7 +141,7 @@ import dotenv
 dotenv.load_dotenv()
 
 async def main():
-    client = AgentClient(target_agent="weather_agent",
+    client = AgentClient(target_agent="demo_agent",
                          redis_url=os.environ.get("REDIS_URL", ""))
     context_id = str(uuid.uuid4())
     while True:
