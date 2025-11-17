@@ -200,6 +200,8 @@ Client interface for interacting with agents.
 import asyncio
 import uuid
 import os
+from langgraph_distributed_agent.agent_client import AgentClient
+
 import dotenv
 dotenv.load_dotenv()
 
