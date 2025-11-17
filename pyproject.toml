@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "langgraph_distributed_agent"            
-version = "0.1.3"                    
+version = "0.1.4"                    
 description = "Huya AIOps Agent SDK"    
 readme = "README.md"                  
 license = { text = "MIT" }            

@@ -285,7 +285,7 @@ class DistributedAgentWorker:
                             is_finish = False
                             if i == len(messages) - 1 and isinstance(message, AIMessage):
                                 snapshot = await self.agent.aget_state(config)
-                                if not snapshot.next and not snapshot.interrupts and not self._is_waiting_response(snapshot):
+                                if not snapshot.next and not snapshot.interrupts and not self._is_waiting_response(snapshot) and not message.tool_calls:
                                     is_finish = True
 
                             context_progess_data = ContextProgressData(type="message",

@@ -133,21 +133,16 @@ if __name__ == '__main__':
 
 ```python
 import asyncio
-from langgraph_distributed_agent.agent_client import AgentClient
-import uuid
+from langgraph_distributed_agent.agent_cli import AgentCLI
 import os
 import dotenv
 
 dotenv.load_dotenv()
 
 async def main():
-    client = AgentClient(target_agent="demo_agent",
+    cli = AgentCLI(target_agent="demo_agent",
                          redis_url=os.environ.get("REDIS_URL", ""))
-    context_id = str(uuid.uuid4())
-    while True:
-        question = input("Input your Question:")
-        await client.send_message(question, context_id)
-        await client.listen_for_responses(context_id)
+    await cli.run()
 
 if __name__ == '__main__':
     asyncio.run(main())
@@ -202,10 +197,42 @@ class AgentRunner:
 与智能体交互的客户端接口。
 
 ```python
-class AgentClient:
-    def __init__(self, target_agent: str, redis_url: str)
-    async def send_message(self, content: str, context_id: str)
-    async def listen_for_responses(self, context_id: str)
+import asyncio
+import uuid
+import os
+import dotenv
+dotenv.load_dotenv()
+
+async def agent_client_test():
+    client = AgentClient(
+        target_agent="main_agent",
+        redis_url=os.environ.get("REDIS_URL", "")
+    )
+
+    context_id = str(uuid.uuid4())
+
+    await client.send_message("hi", context_id)
+
+    async for event in client.progress_events(context_id):
+        AgentClient.print_progress_event(event)
+
+    last_event = await client.get_last_event(context_id)
+
+    print("last_event.data.type=",last_event.data.type)
+
+    if last_event.data.type == 'interrupt':
+        await client.accept_tool_invocation(context_id)
+    #     await client.reject_tool_invocation(context_id)
+
+    # get chat history
+    print("\n\n======= Get Chat History =======\n\n")
+    his = await client.get_chat_history(context_id)
+
+    for item in his:
+        AgentClient.print_progress_event(item['data'])
+        
+# asyncio.run(agent_client_test())
+await agent_client_test() # on jupyter notebook
 ```
 
 ### DistributedAgentWorker
