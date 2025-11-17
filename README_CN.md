@@ -197,7 +197,6 @@ class AgentRunner:
 与智能体交互的客户端接口。
 
 ```python
-import asyncio
 import uuid
 import os
 from langgraph_distributed_agent.agent_client import AgentClient
@@ -214,17 +213,21 @@ async def agent_client_test():
     context_id = str(uuid.uuid4())
 
     await client.send_message("hi", context_id)
-
+    
+    # get response
     async for event in client.progress_events(context_id):
         AgentClient.print_progress_event(event)
 
     last_event = await client.get_last_event(context_id)
 
-    print("last_event.data.type=",last_event.data.type)
-
     if last_event.data.type == 'interrupt':
+        # accept tool invocation
         await client.accept_tool_invocation(context_id)
     #     await client.reject_tool_invocation(context_id)
+    
+        # get response
+        async for event in client.progress_events(context_id):
+            AgentClient.print_progress_event(event)
 
     # get chat history
     print("\n\n======= Get Chat History =======\n\n")
