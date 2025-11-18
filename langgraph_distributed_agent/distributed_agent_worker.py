@@ -18,6 +18,7 @@ from langgraph_distributed_agent.redis_lock import redis_lock
 
 WAITING_RESPONSE = "waiting response..."
 TOOL_REJECT_MESSAGE = "User declined to execute this action"
+EXEC_ABORTED_MESSAGE = "Execution was aborted by user."
 
 
 class ExtendedAgentState(AgentState):
@@ -34,6 +35,7 @@ class EventType(str, Enum):
     AGENT_RESPONSE = "agent_response"
     PROGRESS_UPDATE = "agent_progress"
     TASK_FINISH = "agent_task_finish"
+    AGENT_INTERRUPT = "agent_interrupt"
 
 
 class BaseEvent(BaseModel):
@@ -79,6 +81,17 @@ class AgentCommandEvent(BaseEvent):
     """Command event sent to the agent."""
     event_type: EventType = EventType.AGENT_COMMAND
     data: AgentCommandData
+
+
+class AgentInterruptData(BaseModel):
+    type: Literal["cancel"] = Field(..., description="")
+    invocation_id: str = Field(..., description="Associated invocation ID")
+
+
+class AgentInterruptEvent(BaseEvent):
+    """stop agent exec"""
+    event_type: EventType = EventType.AGENT_INTERRUPT
+    data: AgentInterruptData
 
 
 class AgentResponseData(BaseModel):
@@ -140,6 +153,8 @@ class DistributedAgentWorker:
         self.context_queues: dict[str,
                                   asyncio.Queue] = defaultdict(asyncio.Queue)
         self.context_workers: dict[str, asyncio.Task] = {}
+
+        self.stop_events = dict()
 
     def agent_context_id(self, context_id: str):
         """Format a thread ID for this agent."""
@@ -275,7 +290,8 @@ class DistributedAgentWorker:
             context = dict()
 
         async def emit_events(events):
-            async for event in events:
+
+            async def consume_event(event):
                 for k, v in event.items():
                     print(k)
                     if isinstance(v, dict):
@@ -319,6 +335,49 @@ class DistributedAgentWorker:
                                     await self.redis_client.publish(self.context_key(context_id),
                                                                     context_progress_event.model_dump_json())
 
+            # async for event in events:
+            #     await consume_event(event)
+            stop_event = asyncio.Event()
+            self.stop_events[context_id] = stop_event
+            while not stop_event.is_set():
+                next_event_task = asyncio.create_task(events.__anext__())
+                stop_task = asyncio.create_task(stop_event.wait())
+
+                done, pending = await asyncio.wait(
+                    {next_event_task, stop_task},
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+
+                for task in pending:
+                    task.cancel()
+
+                if stop_task in done:
+                    snapshot = await self.agent.aget_state(config)
+                    last_message = None
+                    if snapshot.values['messages']:
+                        last_message = snapshot.values['messages'][-1]
+                    print("last_message", last_message)
+                    if isinstance(last_message, HumanMessage) or isinstance(last_message, ToolMessage):
+                        # stop llm request
+                        await self.agent.aupdate_state(config, values={"messages": AIMessage(content=EXEC_ABORTED_MESSAGE)})
+                    elif isinstance(last_message, AIMessage) and last_message.tool_calls:
+                        # stop tool exec
+                        tool_messages = [
+                            ToolMessage(content=EXEC_ABORTED_MESSAGE,
+                                        tool_call_id=tool_call['id'])
+                            for tool_call in last_message.tool_calls
+                        ]
+                        await self.agent.aupdate_state(config, values={"messages": tool_messages})
+                    break
+                if next_event_task in done:
+                    try:
+                        event = next_event_task.result()
+                        await consume_event(event)
+                    except StopAsyncIteration:
+                        break
+                    except Exception as e:
+                        break
+
         await emit_events(events)
 
         snapshot = await self.agent.aget_state(config)
@@ -337,26 +396,28 @@ class DistributedAgentWorker:
                     if len(messages) > 0 and isinstance(messages[-1], ToolMessage):
                         if messages[-1].content == TOOL_REJECT_MESSAGE:
                             print("tool rejected.")
-                            agent_response_event = AgentResponseEvent(context_id=context_id, 
-                                                                    data=AgentResponseData(
-                                                                    invocation_id=invocation_id,
-                                                                    content=snapshot.values.get("messages")[-1].content # type: ignore
-                                                                    ))
-                            
-                            context_progess_data = ContextProgressData(type="message",
-                                                                caller_agent=caller_agent,
-                                                                callee_agent=self.agent_name,
-                                                                invocation_id=invocation_id,
-                                                                message=AIMessage(content=f"Tool Rejected").model_dump(),
-                                                                is_finish=True)
-                            context_progress_event = ContextProgressEvent(context_id=context_id,
-                                                                            data=context_progess_data)
+                            agent_response_event = AgentResponseEvent(context_id=context_id,
+                                                                      data=AgentResponseData(
+                                                                          invocation_id=invocation_id,
+                                                                          content=snapshot.values.get(
+                                                                              "messages")[-1].content  # type: ignore
+                                                                      ))
 
-                            await self.redis_client.xadd(self.context_key(context_id), 
-                                                            fields={'data': context_progress_event.model_dump_json()})
-                            await self.redis_client.publish(self.context_key(context_id), 
+                            context_progess_data = ContextProgressData(type="message",
+                                                                       caller_agent=caller_agent,
+                                                                       callee_agent=self.agent_name,
+                                                                       invocation_id=invocation_id,
+                                                                       message=AIMessage(
+                                                                           content=f"Tool Rejected").model_dump(),
+                                                                       is_finish=True)
+                            context_progress_event = ContextProgressEvent(context_id=context_id,
+                                                                          data=context_progess_data)
+
+                            await self.redis_client.xadd(self.context_key(context_id),
+                                                         fields={'data': context_progress_event.model_dump_json()})
+                            await self.redis_client.publish(self.context_key(context_id),
                                                             context_progress_event.model_dump_json())
-                            
+
                             await self.redis_client.xadd(f"agent_event:{caller_agent}", fields={'data': agent_response_event.model_dump_json()})
                             break
 
@@ -371,15 +432,48 @@ class DistributedAgentWorker:
                 if not is_waiting_response:
                     print(
                         f"Emit AgentResponseEvent caller_agent={caller_agent}")
+                    content = snapshot.values.get(
+                        "messages")[-1].content  # type: ignore
                     agent_response_event = AgentResponseEvent(context_id=context_id,
                                                               data=AgentResponseData(
                                                                   invocation_id=invocation_id,
-                                                                  content=snapshot.values.get(
-                                                                      "messages")[-1].content  # type: ignore
+                                                                  content=content
                                                               ))
                     await self.redis_client.xadd(f"agent_event:{caller_agent}", fields={'data': agent_response_event.model_dump_json()})
                 break
 
+    async def handle_agent_interrupt(self, event: AgentInterruptEvent):
+        if event.context_id in self.stop_events:
+            stop_event = self.stop_events[event.context_id]
+            print(f"interrupt exec. context_id={event.context_id}")
+            stop_event.set()
+            
+        # stop  waiting response from subagents
+        config = RunnableConfig(
+            configurable=dict(thread_id=self.agent_context_id(event.context_id)))
+        snapshot = await self.agent.aget_state(config)
+        for message in snapshot.values.get('messages', []):
+            if isinstance(message, ToolMessage) and message.content == WAITING_RESPONSE:
+                new_tool_message = message.model_copy()
+                new_tool_message.content = EXEC_ABORTED_MESSAGE
+                await self.agent.aupdate_state(config, values={"messages": [new_tool_message]})
+        
+        # reject tool calls
+        if snapshot.interrupts:
+            context = snapshot.values.get('context', '') or dict()
+            invocation_id = snapshot.values.get('invocation_id', '')
+            caller_agent = snapshot.values.get('caller_agent', '')
+            events = self.agent.astream(
+                Command(resume=dict(type="reject")),
+                config,
+                stream_mode="updates",
+                context=context,  # type: ignore
+            )
+            await self._process_agent_stream(events, config, event.context_id, invocation_id, caller_agent,
+                                            context=context)
+        
+        print("handle_agent_interrupt")
+        
     async def _dispatch_event(self, data: Dict):
         event_type = data.get("event_type")
 
@@ -412,7 +506,7 @@ class DistributedAgentWorker:
                         invocation_id = event.data.invocation_id
                     except:
                         snapshot = self.agent.get_state(RunnableConfig(
-                            configurable=dict(thread_id=context_id)))
+                            configurable=dict(thread_id=self.agent_context_id(context_id))))
                         invocation_id = snapshot.values.get(
                             'invocation_id', '')
                         caller_agent = snapshot.values.get('caller_agent', '')
@@ -432,6 +526,11 @@ class DistributedAgentWorker:
             queue.task_done()
 
     async def _enqueue_message(self, message_data: dict):
+        # if message_data.get('event_type') == EventType.AGENT_INTERRUPT:
+        #     event = AgentInterruptEvent.model_validate(message_data)
+        #     await self.handle_agent_interrupt(event)
+        #     return
+
         context_id = message_data["context_id"]
         queue = self.context_queues[context_id]
         await queue.put(message_data)
@@ -439,9 +538,19 @@ class DistributedAgentWorker:
             self.context_workers[context_id] = asyncio.create_task(
                 self._run_context_worker(context_id)
             )
+            
+    async def _listen_interrupts(self):
+        pubsub = self.redis_client.pubsub()
+        await pubsub.subscribe(f"agent_interrupt_broadcast:{self.agent_name}")
+        async for msg in pubsub.listen():
+            if msg["type"] == "message":
+                data = json.loads(msg["data"])
+                event = AgentInterruptEvent.model_validate(data)
+                await self.handle_agent_interrupt(event)
 
     async def start(self):
         await self._connect()
+        asyncio.create_task(self._listen_interrupts())  
         while True:
             messages = await self.redis_client.xreadgroup(
                 groupname=self.consumer_group,

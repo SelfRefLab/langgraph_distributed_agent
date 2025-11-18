@@ -7,7 +7,7 @@ import dotenv
 dotenv.load_dotenv()
 
 @tool
-def get_city_weather(city: str, day: str) -> str:
+async def get_city_weather(city: str, day: str) -> str:
     """
     Get the weather for a specific city and date.
 
